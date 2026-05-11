@@ -1,317 +1,75 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="robots" content="noindex, nofollow">
-    <title>Cobrança Rápida | Tamandaré Tintas</title>
-    <link rel="icon" type="image/png" href="favicon.png">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <style>
-        :root {
-            --gray-light: #f8f9fa;
-            --gray-medium: #e9ecef;
-            --gray-chumbo: #495057;
-            --text-dark: #343a40;
-            --wa-green: #25d366;
-            --primary-blue: #0d6efd;
-            --atraso-4: #ffd43b;
-            --atraso-11: #fd7e14;
-            --atraso-30: #fa5252;
-        }
+function atualizarContadores(agrupados) {
+    const total = Object.keys(agrupados).length;
+    let ca = 0; let ft = 0; let semFone = 0;
 
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f1f3f5; color: var(--text-dark); margin: 0; padding: 20px; }
-        .container { max-width: 1200px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .header h1 { margin: 0; font-weight: 300; color: #495057; font-size: 28px; }
-        .logo { height: 50px; }
-
-        .input-row { display: flex; align-items: center; gap: 20px; margin-bottom: 15px; padding: 15px; background: var(--gray-light); border-radius: 8px; border-left: 5px solid var(--primary-blue); }
-        .btn-upload-wrapper { position: relative; overflow: hidden; display: inline-block; }
-        .btn-upload { background: var(--primary-blue); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 10px; }
-        .btn-upload input[type=file] { position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
-
-        .input-group { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: var(--gray-chumbo); }
-        .input-cobrador { padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 200px; outline: none; }
-
-        .controls { display: flex; gap: 10px; margin-bottom: 25px; align-items: center; flex-wrap: wrap; }
-        .search-box { flex-grow: 1; padding: 11px; border: 1px solid var(--gray-medium); border-radius: 8px; outline: none; }
+    Object.values(agrupados).forEach(g => {
+        const foneData = processarTelefone(g.fone);
+        if (!foneData.valido) semFone++;
         
-        .btn-filter { background: white; border: 1px solid #dee2e6; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 500; color: #6c757d; }
-        .btn-filter.active { background: var(--gray-chumbo); color: white; border-color: var(--gray-chumbo); }
-        .btn-custom { background: white; color: var(--gray-chumbo); border: 1px solid #dee2e6; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        // CORREÇÃO 1: Lógica robusta para identificar o grupo do cliente
+        const temTitulosFT = g.titulos.some(t => 
+            t.num.toUpperCase().includes("D") || 
+            ['FT', 'DP', 'IX', 'CP', 'RN'].includes(t.fpOriginal)
+        );
 
-        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        th { padding: 12px; text-align: left; font-size: 11px; text-transform: uppercase; color: #adb5bd; border-bottom: 2px solid var(--gray-light); }
-        td { padding: 16px 12px; border-bottom: 1px solid var(--gray-light); font-size: 14px; vertical-align: top; }
-        .cliente-nome.cobrado { text-decoration: line-through; opacity: 0.5; color: #999; }
-        .btn-wa { background: var(--wa-green); color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; text-decoration: none; font-weight: 600; font-size: 12px; display: inline-block; }
-        .titulos-list { font-size: 11px; margin-top: 4px; color: #666; font-family: monospace; }
-        .badge-dias { font-weight: bold; }
-        .chk-cobrado { width: 20px; height: 20px; cursor: pointer; }
-    </style>
-</head>
-<body>
+        const temTitulosCA = g.titulos.some(t => t.fpOriginal === 'CA');
 
-<div class="container">
-    <div class="header">
-        <h1>Cobrança Rápida</h1>
-        <img src="logo.png" alt="Logo" class="logo">
-    </div>
-
-    <div class="input-row">
-        <div class="btn-upload-wrapper">
-            <button class="btn-upload">
-                <span>📁</span> <span id="fileNameLabel">Carregar Arquivo CSV</span>
-                <input type="file" id="csvFile" accept=".csv">
-            </button>
-        </div>
-        <div class="input-group" style="margin-left:auto;">
-            <label for="cobradorNome">Cobrador:</label>
-            <input type="text" id="cobradorNome" class="input-cobrador" placeholder="Nome para assinatura">
-        </div>
-    </div>
-
-    <div class="controls">
-        <button class="btn-filter active" id="btnFT" onclick="setFilter('FT')">FT e Afins</button>
-        <button class="btn-filter" id="btnCA" onclick="setFilter('CA')">Carteira (CA)</button>
-        <input type="text" id="search" class="search-box" placeholder="Pesquisar por nome ou código...">
-        <button class="btn-custom" onclick="exportarLog()">📄 Baixar Conranças Realizadas</button>
-        <button class="btn-custom" onclick="exportarSemFone()">⚠️ Clientes sem WhatsApp</button>
-    </div>
-    
-    <table id="tabelaCobranca">
-        <thead>
-            <tr>
-                <th style="width:28%;">Código | Cliente</th>
-                <th id="colDataRef" style="width:38%;">Títulos / Vencimento / Atraso</th>
-                <th style="width:12%;">Total</th>
-                <th style="width:16%; text-align:right;">Ação</th>
-                <th style="width:6%; text-align:center;">✔</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
-</div>
-
-<script>
-    let rawData = [];
-    let currentMode = 'FT';
-    let cobradosIds = new Set();
-
-    document.getElementById('csvFile').addEventListener('change', function(e) {
-        if (e.target.files.length > 0) {
-            const file = e.target.files[0];
-            document.getElementById('fileNameLabel').innerText = file.name;
-
-            Papa.parse(file, {
-                header: true,
-                delimiter: ";",
-                encoding: "ISO-8859-1",
-                skipEmptyLines: true,
-                complete: (results) => {
-                    // VALIDAÇÃO DE ARQUIVO INCOMPATÍVEL
-                    const colunasObrigatorias = ["FONE", "DIAS EMATRASO", "CPF/CNPJ", "VALORATUALIZADO"];
-                    const colunasArquivo = results.meta.fields;
-                    const ehIncompativel = !colunasObrigatorias.every(col => colunasArquivo.includes(col));
-
-                    if (ehIncompativel) {
-                        alert("Relatório incompatível, certifique-se de que gerou o relatório usando o caminho correto:\n\nCONTAS A RECEBER - RELATÓRIOS - CLIENTES - TÍTULOS EM ABERTO ANALÍTICO POR DOCUMENTO, salvar em CSV.");
-                        rawData = [];
-                        document.getElementById('fileNameLabel').innerText = "Carregar Arquivo CSV";
-                        e.target.value = ""; // Limpa o input
-                    } else {
-                        cobradosIds.clear(); // Limpeza de memória ao carregar novo arquivo
-                        rawData = results.data;
-                    }
-                    processAndRender();
-                }
-            });
+        if (temTitulosFT) {
+            ft++;
+        } else if (temTitulosCA) {
+            ca++;
         }
     });
 
-    function setFilter(mode) {
-        currentMode = mode;
-        document.getElementById('btnFT').classList.toggle('active', mode === 'FT');
-        document.getElementById('btnCA').classList.toggle('active', mode === 'CA');
-        document.getElementById('colDataRef').innerText = mode === 'CA' ? 'Títulos / Emissão' : 'Títulos / Vencimento / Atraso';
-        processAndRender();
-    }
+    document.getElementById('statTotal').innerText = total;
+    document.getElementById('statCA').innerText = ca;
+    document.getElementById('statFT').innerText = ft;
+    document.getElementById('statSemFone').innerText = semFone;
+}
 
-    function processarTelefone(tel) {
-        if (!tel) return { valido: false, numeroLimpo: "", original: "Sem fone" };
-        let clean = tel.replace(/\D/g, '');
-        if (clean.startsWith('0')) clean = clean.substring(1);
-        const ehCelular = clean.length === 11 && clean.charAt(2) === '9';
-        return { valido: ehCelular, numeroLimpo: "55" + clean, original: tel.trim() };
-    }
+function exportarSemFone() {
+    // CORREÇÃO 2: Aplicando a busca (term) na exportação
+    const term = document.getElementById('search').value.toLowerCase();
+    
+    let filtrados = rawData.filter(item => {
+        const dias = parseInt(item["DIAS EMATRASO"]) || 0;
+        const fp = normalizarFP(item);
+        const foneData = processarTelefone(item["FONE"]);
+        
+        // Verifica se o fone é inválido/fixo
+        const foneInvalido = !foneData.valido;
 
-    function normalizarFP(item) {
-        const doc = (item["DOCUMENTO"] || "").toUpperCase();
-        let fp = item["FP"];
-        if (doc.includes("D")) fp = "FT";
-        return fp;
-    }
-
-    function converterValor(valor) {
-        if (!valor) return 0;
-        let str = valor.toString().trim();
-        // Remove pontos de milhar e troca vírgula por ponto decimal
-        return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
-    }
-
-    function formatarMoeda(valor) {
-        return Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    }
-
-    function toggleCheck(id) {
-        if (cobradosIds.has(id)) cobradosIds.delete(id);
-        else cobradosIds.add(id);
-        processAndRender();
-    }
-
-    function gerarSaudacao(nome, cobrador) {
-        nome = (nome || "").trim();
-        if (!nome) {
-            return cobrador ? `Olá! Tudo bem? Aqui é *${cobrador}* da Tamandaré Tintas.` : `Olá! Tudo bem? Aqui é da Tamandaré Tintas.`;
-        }
-        return cobrador ? `Olá, *${nome}*! Tudo bem? Aqui é *${cobrador}* da Tamandaré Tintas.` : `Olá, *${nome}*! Tudo bem? Aqui é da Tamandaré Tintas.`;
-    }
-
-    function processAndRender() {
-        const term = document.getElementById('search').value.toLowerCase();
-        const cobrador = document.getElementById('cobradorNome').value.trim();
-
-        let filtrados = rawData.filter(item => {
-            const dias = parseInt(item["DIAS EMATRASO"]) || 0;
-            const fp = normalizarFP(item);
-            if (currentMode === 'CA') return fp === 'CA';
-            return ['FT', 'DP', 'IX', 'CP', 'RN'].includes(fp) && dias >= 4;
-        });
-
-        if (term) {
-            filtrados = filtrados.filter(i => 
-                i["NOME DO CLIENTE"]?.toLowerCase().includes(term) || i["CÓDIGO"]?.toString().includes(term)
-            );
+        // Filtro por modo (CA ou FT)
+        let passaFiltroModo = false;
+        if (currentMode === 'CA') {
+            passaFiltroModo = (fp === 'CA');
+        } else {
+            passaFiltroModo = (['FT', 'DP', 'IX', 'CP', 'RN'].includes(fp) && dias >= 4);
         }
 
-        const agrupados = {};
-        filtrados.forEach(item => {
-            const id = item["CPF/CNPJ"];
-            if (!id) return; // Ignora linhas sem ID
+        // Filtro por termo de busca
+        const passaBusca = !term || 
+            item["NOME DO CLIENTE"]?.toLowerCase().includes(term) || 
+            item["CÓDIGO"]?.toString().includes(term);
 
-            if (!agrupados[id]) {
-                agrupados[id] = {
-                    codigo: item["CÓDIGO"],
-                    nome: (item["NOME DO CLIENTE"] || "").trim(),
-                    fone: item["FONE"],
-                    id: id,
-                    total: 0,
-                    titulos: []
-                };
-            }
-            const vAtual = converterValor(item["VALORATUALIZADO"]);
-            agrupados[id].total += vAtual;
-            agrupados[id].titulos.push({
-                num: item["DOCUMENTO"],
-                emissao: item["DATAEMISSÃO"],
-                venc: item["DATAVENCIMENTO"],
-                dias: parseInt(item["DIAS EMATRASO"]) || 0,
-                vOrig: converterValor(item["VALOR ARECEBER"]),
-                vAtu: vAtual
-            });
-        });
+        return passaFiltroModo && foneInvalido && passaBusca;
+    });
 
-        const tbody = document.querySelector('#tabelaCobranca tbody');
-        tbody.innerHTML = '';
+    const semFoneList = []; 
+    const seen = new Set();
 
-        Object.values(agrupados).forEach(g => {
-            const foneData = processarTelefone(g.fone);
-            const estaCobrado = cobradosIds.has(g.id);
-            const totalFmt = formatarMoeda(g.total);
-            const maiorAtraso = Math.max(...g.titulos.map(t => t.dias));
-            const saudacao = gerarSaudacao(g.nome, cobrador);
-            const assina = cobrador ? `Atenciosamente,\n*${cobrador}*\nTamandaré Tintas` : `Atenciosamente,\nEquipe Tamandaré Tintas`;
+    filtrados.forEach(item => {
+        if (!seen.has(item["CPF/CNPJ"])) {
+            semFoneList.push(`Código: ${item["CÓDIGO"]} | Cliente: ${item["NOME DO CLIENTE"].trim()} | Fone no Cadastro: ${item["FONE"] || "Vazio"}`);
+            seen.add(item["CPF/CNPJ"]);
+        }
+    });
 
-            let titulosHtml = g.titulos.map(t => {
-                let cor = '#adb5bd';
-                if (currentMode !== 'CA') {
-                    if (t.dias >= 30) cor = 'var(--atraso-30)';
-                    else if (t.dias >= 11) cor = 'var(--atraso-11)';
-                    else if (t.dias >= 4) cor = 'var(--atraso-4)';
-                }
-                return `<div class="titulos-list">• Doc: ${t.num} | ${currentMode === 'CA' ? t.emissao : t.venc} | <span class="badge-dias" style="color:${cor}">${t.dias} Dias</span></div>`;
-            }).join('');
-
-            let listaMsg = g.titulos.map(t => currentMode === 'CA' 
-                ? `- Título: ${t.num} | Emissão: ${t.emissao} | Valor: ${formatarMoeda(t.vOrig)}`
-                : `- Doc: ${t.num} | Vencimento: ${t.venc} | Valor: ${formatarMoeda(t.vAtu)}`
-            ).join('\n');
-
-            let msg = "";
-            if (currentMode === 'CA') {
-                msg = `${saudacao}\n\nEstou entrando em contato para passar o fechamento e verificar a forma de pagamento.\n\nResumo dos títulos:\n${listaMsg}\n\n*Total: ${totalFmt}*\n\nPor favor, informe a forma de pagamento desejada:\n\n● PIX - Enviaremos a chave para pagamento.\n● BOLETO - Informe o vencimento desejado.\n● CARTÃO - Pagamento na loja.\n\nNo aguardo. Obrigado.`;
-            } else if (maiorAtraso >= 30) {
-                msg = `*AVISO IMPORTANTE - RISCO DE PROTESTO*\n\n${saudacao}\n\nIdentificamos pendências com mais de 30 dias de atraso. Solicitamos a regularização para evitar envio automático ao protesto.\n\n${listaMsg}\n\n*Total Atualizado: ${totalFmt}*\n\n${assina}`;
-            } else if (maiorAtraso >= 11) {
-                msg = `${saudacao}\n\nNotamos títulos em aberto no sistema:\n\n${listaMsg}\n\n*Total: ${totalFmt}*\n\nTem alguma posição sobre esses pagamentos?\n\n${assina}`;
-            } else {
-                msg = `${saudacao}\n\nEstou passando para lembrar que os títulos abaixo ainda constam em aberto em nosso sistema:\n\n${listaMsg}\n\n*Total: ${totalFmt}*\n\nCaso o pagamento já tenha sido realizado, por favor desconsiderar.\n\n${assina}`;
-            }
-
-            const waLink = `https://wa.me/${foneData.numeroLimpo}?text=${encodeURIComponent(msg)}`;
-
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><span class="cliente-nome ${estaCobrado ? 'cobrado' : ''}"><small style="color:#adb5bd">${g.codigo}</small><br><strong>${g.nome}</strong></span></td>
-                <td>${titulosHtml}</td>
-                <td style="vertical-align: middle;"><strong>${totalFmt}</strong></td>
-                <td style="text-align: right; vertical-align: middle;">
-                    ${foneData.valido ? `<a href="${waLink}" target="_blank" class="btn-wa" onclick="if(!cobradosIds.has('${g.id}')) toggleCheck('${g.id}')">WhatsApp</a>` : `<span style="font-size:12px; color:#999">${foneData.original}</span>`}
-                </td>
-                <td style="text-align: center; vertical-align: middle;"><input type="checkbox" class="chk-cobrado" ${estaCobrado ? 'checked' : ''} onclick="toggleCheck('${g.id}')"></td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function exportarLog() {
-        let log = []; const seen = new Set();
-        rawData.forEach(item => {
-            if (cobradosIds.has(item["CPF/CNPJ"]) && !seen.has(item["CPF/CNPJ"])) {
-                log.push(`Cliente: ${item["NOME DO CLIENTE"]} | Código: ${item["CÓDIGO"]} | CPF/CNPJ: ${item["CPF/CNPJ"]}`);
-                seen.add(item["CPF/CNPJ"]);
-            }
-        });
-        if (log.length === 0) return alert("Nenhum cliente marcado.");
-        const blob = new Blob([log.join('\n')], { type: 'text/plain' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = `log-cobranca.txt`; a.click();
-    }
-
-    function exportarSemFone() {
-        const term = document.getElementById('search').value.toLowerCase();
-        let filtrados = rawData.filter(item => {
-            const dias = parseInt(item["DIAS EMATRASO"]) || 0;
-            const fp = normalizarFP(item);
-            const foneData = processarTelefone(item["FONE"]);
-            if (currentMode === 'CA') return fp === 'CA' && !foneData.valido;
-            return ['FT', 'DP', 'IX', 'CP', 'RN'].includes(fp) && dias >= 4 && !foneData.valido;
-        });
-        const semFoneList = []; const seen = new Set();
-        filtrados.forEach(item => {
-            if (!seen.has(item["CPF/CNPJ"])) {
-                semFoneList.push(`Código: ${item["CÓDIGO"]} | Cliente: ${item["NOME DO CLIENTE"].trim()} | Fone: ${item["FONE"] || "Vazio"}`);
-                seen.add(item["CPF/CNPJ"]);
-            }
-        });
-        if (semFoneList.length === 0) return alert("Nenhum cliente sem WhatsApp encontrado.");
-        const blob = new Blob([semFoneList.join('\n')], { type: 'text/plain' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = `clientes_sem_whatsapp.txt`; a.click();
-    }
-
-    document.getElementById('search').addEventListener('input', processAndRender);
-    document.getElementById('cobradorNome').addEventListener('input', processAndRender);
-</script>
-</body>
-</html>
+    if (semFoneList.length === 0) return mostrarErro("Nenhum cliente sem WhatsApp encontrado nos filtros/busca atuais.");
+    
+    const blob = new Blob([semFoneList.join('\n')], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `clientes_sem_whatsapp.txt`;
+    a.click();
+}
