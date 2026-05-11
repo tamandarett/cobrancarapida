@@ -189,11 +189,24 @@
         return fp;
     }
 
-    function converterValor(valor) {
-        if (!valor) return 0;
-        let str = valor.toString().trim();
-        return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
+function converterValor(valor) {
+    if (!valor) return 0;
+    
+    // Converte para string e limpa espaços
+    let str = valor.toString().trim();
+    
+    // Se o valor contiver vírgula e ponto (ex: 1.755,85)
+    if (str.includes(',') && str.includes('.')) {
+        str = str.replace(/\./g, '').replace(',', '.');
+    } 
+    // Se contiver apenas vírgula (ex: 1755,85)
+    else if (str.includes(',')) {
+        str = str.replace(',', '.');
     }
+    
+    const num = parseFloat(str);
+    return isNaN(num) ? 0 : num;
+}
 
     function formatarMoeda(valor) {
         return Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
