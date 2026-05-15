@@ -98,6 +98,7 @@
             <div class="stat-item">Clientes <span class="stat-value" id="statTotal">0</span></div>
             <div class="stat-item">CA <span class="stat-value" id="statCA">0</span></div>
             <div class="stat-item">FT e Afins <span class="stat-value" id="statFT">0</span></div>
+            <div class="stat-item">Protestados <span class="stat-value" id="statProt" style="color: var(--tamandare-red);">0</span></div>
             <div class="stat-item">Sem Whats <span class="stat-value" id="statSemFone" style="color: var(--tamandare-red);">0</span></div>
         </div>
         <div class="radio-group">
@@ -113,6 +114,8 @@
     <div class="controls">
         <button class="btn-filter active" id="btnFT" onclick="setFilter('FT')">FT e Afins</button>
         <button class="btn-filter" id="btnCA" onclick="setFilter('CA')">Carteira (CA)</button>
+        <button class="btn-filter" id="btnProt" onclick="setFilter('PROT')" style="color: var(--tamandare-red); border-color: var(--tamandare-red);">Protestados</button>
+        
         <input type="text" id="search" class="search-box" placeholder="Pesquisar por nome ou código...">
         <button class="btn-custom" onclick="exportarLog()">📄 Baixar Cobranças Realizadas</button>
         <button class="btn-custom" onclick="exportarSemFone()">⚠️ Sem Whats</button>
@@ -123,7 +126,7 @@
         <thead>
             <tr>
                 <th style="width:22%">Cliente</th>
-                <th style="width:36%">Títulos / Valores / Atraso</th>
+                <th id="colDataRef" style="width:36%">Títulos / Valores / Atraso</th>
                 <th style="width:14%">Total</th>
                 <th style="width:12%;text-align:center">Últ. Cobr.</th>
                 <th style="width:12%;text-align:right">Ação</th>
@@ -143,7 +146,6 @@
     const mostrarErro = (t) => { document.getElementById('alertMsg').innerText = t; document.getElementById('customAlert').style.display = 'flex'; };
     const fecharErro = () => { document.getElementById('customAlert').style.display = 'none'; };
     
-    // Funções do Modal de Limpeza
     function abrirLimpeza() { document.getElementById('limpezaAlert').style.display = 'flex'; }
     function fecharLimpeza() { document.getElementById('limpezaAlert').style.display = 'none'; }
     function executarLimpeza(tipo) {
@@ -185,8 +187,8 @@
         if (e.target.files.length > 0) {
             const f = e.target.files[0]; document.getElementById('fileNameLabel').innerText = f.name; currentFileKey = f.name + "_" + f.size;
             Papa.parse(f, { header: true, delimiter: ";", encoding: "ISO-8859-1", skipEmptyLines: true, complete: (res) => {
-                const cols = ["FONE", "DIAS EMATRASO", "CPF/CNPJ", "VALORATUALIZADO", "VALOR ARECEBER"];
-                if (!cols.every(c => (res.meta.fields || []).includes(c))) { mostrarErro("Relatório incompatível. Gere em: CONTAS A RECEBER -> RELATÓRIOS -> CLIENTES -> TÍTULOS EM ABERTO ANALÍTICO."); rawData = []; e.target.value = ""; }
+                const cols = ["FONE", "DIAS EMATRASO", "CPF/CNPJ", "VALORATUALIZADO", "VALOR ARECEBER", "ST"];
+                if (!cols.every(c => (res.meta.fields || []).includes(c))) { mostrarErro("Relatório incompatível. Gere em: CONTAS A RECEBER -> RELATÓRIOS -> CLIENTES -> TÍTULOS EM ABERTO ANALÍTICO, certifique-se de incluir a coluna ST."); rawData = []; e.target.value = ""; }
                 else { cobradosIds = fileSessions[currentFileKey] ? new Set(fileSessions[currentFileKey].ids) : new Set(); rawData = res.data; processAndRender(); }
             }});
         }
@@ -198,6 +200,19 @@
         currentMode = m; 
         document.getElementById('btnFT').classList.toggle('active', m === 'FT'); 
         document.getElementById('btnCA').classList.toggle('active', m === 'CA'); 
+        
+        const btnProt = document.getElementById('btnProt');
+        if (m === 'PROT') {
+            btnProt.classList.add('active');
+            btnProt.style.background = 'var(--tamandare-red)';
+            btnProt.style.color = 'white';
+        } else {
+            btnProt.classList.remove('active');
+            btnProt.style.background = 'white';
+            btnProt.style.color = 'var(--tamandare-red)';
+        }
+
+        document.getElementById('colDataRef').innerText = m === 'CA' ? 'Títulos / Emissão' : 'Títulos / Vencimento / Atraso';
         processAndRender(); 
     }
 
@@ -223,6 +238,13 @@
             btn.style.opacity = "0.8";
             setTimeout(() => { btn.innerText = oldTxt; btn.style.opacity = "1"; }, 2000);
         });
+        
+        const tr = btn.closest('tr');
+        const id = tr.querySelector('.chk-cobrado').getAttribute('onclick').match(/'([^']+)'/)[1];
+        const now = Date.now();
+        const g = agrupadosGlobal[id];
+        if (g) { g.titulos.forEach(t => { billingHistory[t.num] = now; }); localStorage.setItem('tt_billing_history', JSON.stringify(billingHistory)); }
+        if (!cobradosIds.has(id)) toggleCheck(id); else processAndRender();
     }
 
     function processAndRender() {
@@ -231,21 +253,31 @@
         rawData.forEach(i => { 
             const id = i["CPF/CNPJ"]; if (!id) return;
             if (!todos[id]) todos[id] = { fone: i["FONE"], titulos: [] };
-            todos[id].titulos.push({ num: i["DOCUMENTO"], fpO: i["FP"] });
+            todos[id].titulos.push({ num: i["DOCUMENTO"], fpO: i["FP"], st: i["ST"] ? parseInt(i["ST"], 10) : 0 });
         });
         
-        let cCA = 0, cFT = 0, cSF = 0;
+        let cCA = 0, cFT = 0, cSF = 0, cProt = 0;
         Object.values(todos).forEach(g => {
             if (!processarTelefone(g.fone).valido) cSF++;
+            if (g.titulos.some(t => t.st === 2)) cProt++;
             if (g.titulos.some(t => t.num.toUpperCase().includes("D") || ['FT','DP','IX','CP','RN'].includes(t.fpO))) cFT++;
             if (g.titulos.some(t => t.fpO === 'CA' && !t.num.toUpperCase().includes("D"))) cCA++;
         });
         document.getElementById('statTotal').innerText = Object.keys(todos).length;
-        document.getElementById('statCA').innerText = cCA; document.getElementById('statFT').innerText = cFT; document.getElementById('statSemFone').innerText = cSF;
+        document.getElementById('statCA').innerText = cCA; 
+        document.getElementById('statFT').innerText = cFT; 
+        document.getElementById('statProt').innerText = cProt;
+        document.getElementById('statSemFone').innerText = cSF;
 
         const fil = rawData.filter(i => {
-            const d = parseInt(i["DIAS EMATRASO"]) || 0, fp = normalizarFP(i);
-            const matchMode = currentMode === 'CA' ? fp === 'CA' : (['FT','DP','IX','CP','RN'].includes(fp) && d >= 4);
+            const d = parseInt(i["DIAS EMATRASO"]) || 0, fp = normalizarFP(i), st = i["ST"] ? parseInt(i["ST"], 10) : 0;
+            const isProt = st === 2;
+            
+            let matchMode = false;
+            if (currentMode === 'PROT') matchMode = isProt;
+            else if (currentMode === 'CA') matchMode = (fp === 'CA');
+            else if (currentMode === 'FT') matchMode = (['FT','DP','IX','CP','RN'].includes(fp) && d >= 2);
+
             const matchBusca = !term || i["NOME DO CLIENTE"]?.toLowerCase().includes(term) || i["CÓDIGO"]?.toString().includes(term);
             return matchMode && matchBusca;
         });
@@ -256,7 +288,7 @@
             if (!agT[id]) agT[id] = { codigo: i["CÓDIGO"], nome: (i["NOME DO CLIENTE"] || "").trim(), fone: i["FONE"], id: id, tO: 0, tA: 0, titulos: [] };
             const vO = converterValor(i["VALOR ARECEBER"]), vA = converterValor(i["VALORATUALIZADO"]);
             agT[id].tO += vO; agT[id].tA += vA;
-            agT[id].titulos.push({ num: i["DOCUMENTO"], emissao: i["DATAEMISSÃO"], venc: i["DATAVENCIMENTO"], dias: parseInt(i["DIAS EMATRASO"])||0, vOrig: vO, vAtu: vA });
+            agT[id].titulos.push({ num: i["DOCUMENTO"], emissao: i["DATAEMISSÃO"], venc: i["DATAVENCIMENTO"], dias: parseInt(i["DIAS EMATRASO"])||0, vOrig: vO, vAtu: vA, isProt: (i["ST"] && parseInt(i["ST"], 10) === 2) });
         });
 
         agrupadosGlobal = agT;
@@ -268,34 +300,44 @@
         arr.forEach(g => {
             const esta = cobradosIds.has(g.id), mAt = Math.max(...g.titulos.map(t => t.dias)), pref = document.querySelector('input[name="waPref"]:checked').value;
             let maisR = 0;
-            let tHtml = g.titulos.map(t => {
-                let cor = '#adb5bd'; if (currentMode !== 'CA') { if(t.dias>=30) cor='var(--atraso-30)'; else if(t.dias>=11) cor='var(--atraso-11)'; else if(t.dias>=4) cor='var(--atraso-4)'; }
+            
+            let hasProtestado = g.titulos.some(t => t.isProt);
+            let avisoProtesto = hasProtestado ? `<div class="titulos-list" style="color: var(--tamandare-red); font-weight: bold; text-align: center; margin-bottom: 5px;">O CLIENTE POSSUI TITULOS PROTESTADOS</div>` : '';
+
+            let tHtml = avisoProtesto + g.titulos.map(t => {
+                let cor = '#adb5bd'; if (currentMode !== 'CA') { if(t.dias>=30) cor='var(--atraso-30)'; else if(t.dias>=11) cor='var(--atraso-11)'; else if(t.dias>=2) cor='var(--atraso-4)'; }
                 let ts = billingHistory[t.num]; if (ts && ts > maisR) maisR = ts;
-                return `<div class="titulos-list">• ${t.num} | ${currentMode==='CA'?t.emissao:t.venc} | <span style="color:#333">${formatarMoeda(t.vOrig)}</span> | <span class="badge-dias" style="color:${cor}">${t.dias}d</span>${ts?`<span style="color:var(--gray-chumbo)"> [✓]</span>`:''}</div>`;
+                let numDisplay = t.isProt ? `<span style="color: var(--tamandare-red); font-weight: bold;">${t.num}</span>` : t.num;
+                return `<div class="titulos-list">• Doc: ${numDisplay} | ${currentMode==='CA'?t.emissao:t.venc} | <span style="color:#333">${formatarMoeda(t.vOrig)}</span> | <span class="badge-dias" style="color:${cor}">${t.dias}d</span>${ts?`<span style="color:var(--gray-chumbo)"> [✓]</span>`:''}</div>`;
             }).join('');
 
-            // Constroi Mensagens Revisadas
-            const saud = `Olá, *${g.nome}*! Tudo bem? ${cobr ? 'Aqui é *' + cobr + '* da Tamandaré Tintas.' : 'Aqui é da Tamandaré Tintas.'}`;
+            const saud = `Olá, *${g.nome}*! Tudo bem?\n${cobr ? 'Aqui é *' + cobr + '* da Tamandaré Tintas.' : 'Aqui é da Tamandaré Tintas.'}`;
             const ass = cobr ? `Atenciosamente,\n*${cobr}*\nTamandaré Tintas` : `Atenciosamente,\nEquipe Tamandaré Tintas`;
             let msg = "";
 
-            if (currentMode === 'CA') {
+            if (currentMode === 'PROT') {
+                let mBody = g.titulos.map(t => `- Doc: ${t.num} | Venc.: ${t.venc} | Original: ${formatarMoeda(t.vOrig)} | Atualizado: ${formatarMoeda(t.vAtu)}`).join('\n');
+                msg = `${saud}\n\nIdentificamos alguns títulos protestados vinculados ao seu cadastro e gostaríamos de conversar para buscar a melhor forma de regularização.\n\n*Relação de títulos em aberto:*\n${mBody}\n\n*Valor total em aberto:* ${formatarMoeda(g.tO)}\n*Valor atualizado:* ${formatarMoeda(g.tA)}\n\nNosso objetivo é encontrar uma condição viável para ambas as partes, evitando maiores transtornos e possibilitando futuras negociações normalmente.\n\nFicamos à disposição para conversarmos sobre as condições disponíveis e auxiliar no que for necessário.\n\n${ass}`;
+            }
+            else if (currentMode === 'CA') {
                 let mBody = g.titulos.map(t => `- Título: ${t.num} | Emissão: ${t.emissao} | Valor: ${formatarMoeda(t.vOrig)}`).join('\n');
                 msg = `${saud}\n\nEstou entrando em contato para passar o fechamento e verificar a forma de pagamento.\n\nResumo dos títulos:\n${mBody}\n\n*Total: ${formatarMoeda(g.tO)}*\n\nPor favor, informe a forma de pagamento desejada:\n\n● PIX - Enviaremos a chave para pagamento.\n● BOLETO - Informe o vencimento desejado.\n● CARTÃO - Pagamento na loja.\n\nNo aguardo. Obrigado.`;
             } else {
                 let mBody = g.titulos.map(t => `- Doc: ${t.num} | Venc.: ${t.venc} | Original: ${formatarMoeda(t.vOrig)} | Atualizado: ${formatarMoeda(t.vAtu)}`).join('\n');
                 let fecho = `*Total Original: ${formatarMoeda(g.tO)}*\n*Total Atualizado: ${formatarMoeda(g.tA)}*`;
                 
-                if (mAt >= 30) {
+                if (mAt >= 30 || hasProtestado) {
                     msg = `*AVISO IMPORTANTE - RISCO DE PROTESTO*\n\n${saud}\n\nIdentificamos pendências com mais de 30 dias de atraso. Solicitamos a regularização imediata para evitar o envio automático ao protesto:\n\n${mBody}\n\n${fecho}\n\n${ass}`;
                 } else if (mAt >= 11) {
                     msg = `${saud}\n\nNotamos títulos em aberto no sistema:\n\n${mBody}\n\n${fecho}\n\nTem alguma posição sobre esses pagamentos?\n\n${ass}`;
                 } else {
-                    msg = `${saud}\n\nEstou passando para lembrar que os títulos abaixo ainda constam em aberto em nosso sistema:\n\n${mBody}\n\n${fecho}\n\nCaso o pagamento já tenha sido realizado, por favor desconsiderar.\n\n${ass}`;
+                    msg = `${saud}\n\nEstou passando para lembrar que os títulos abaixo constam em aberto em nosso sistema:\n\n${mBody}\n\n${fecho}\n\nCaso o pagamento já tenha sido realizado, por favor desconsiderar.\n\n${ass}`;
                 }
             }
 
-            const link = (pref === 'web' ? 'https://wa.me/' : 'whatsapp://send?phone=') + g.fd.numeroLimpo + '&text=' + encodeURIComponent(msg);
+            const link = pref === 'web' 
+                ? `https://wa.me/${g.fd.numeroLimpo}?text=${encodeURIComponent(msg)}` 
+                : `whatsapp://send?phone=${g.fd.numeroLimpo}&text=${encodeURIComponent(msg)}`;
             
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -330,14 +372,22 @@
     }
 
     function exportarSemFone() {
-        const t = document.getElementById('search').value.toLowerCase();
+        const term = document.getElementById('search').value.toLowerCase();
         let f = rawData.filter(i => {
-            const fd = processarTelefone(i["FONE"]), b = !t || i["NOME DO CLIENTE"]?.toLowerCase().includes(t) || i["CÓDIGO"]?.toString().includes(t);
-            if (currentMode==='CA') return normalizarFP(i)==='CA' && !fd.valido && b;
-            return ['FT','DP','IX','CP','RN'].includes(normalizarFP(i)) && (parseInt(i["DIAS EMATRASO"])||0) >= 4 && !fd.valido && b;
+            const fd = processarTelefone(i["FONE"]), b = !term || i["NOME DO CLIENTE"]?.toLowerCase().includes(term) || i["CÓDIGO"]?.toString().includes(term);
+            const d = parseInt(i["DIAS EMATRASO"]) || 0, fp = normalizarFP(i), st = i["ST"] ? parseInt(i["ST"], 10) : 0;
+            const isProt = st === 2;
+            
+            let matchMode = false;
+            if (currentMode === 'PROT') matchMode = isProt;
+            else if (currentMode === 'CA') matchMode = (fp === 'CA');
+            else if (currentMode === 'FT') matchMode = (['FT','DP','IX','CP','RN'].includes(fp) && d >= 2);
+
+            return matchMode && !fd.valido && b;
         });
+        
         const l = []; const s = new Set(); f.forEach(i => { if (!s.has(i["CPF/CNPJ"])) { l.push(`Código: ${i["CÓDIGO"]} | Cliente: ${i["NOME DO CLIENTE"].trim()} | Fone: ${i["FONE"]||"Vazio"}`); s.add(i["CPF/CNPJ"]); } });
-        if (!l.length) return mostrarErro("Nenhum cliente sem Whats encontrado.");
+        if (!l.length) return mostrarErro("Nenhum cliente sem Whats encontrado nos filtros/busca.");
         const b = new Blob([l.join('\n')], { type: 'text/plain' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `sem_whatsapp.txt`; a.click();
     }
     document.getElementById('search').addEventListener('input', processAndRender);
